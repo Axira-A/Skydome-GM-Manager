@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { Character, GameState, Item, LogEntry, NodeContent } from '../types/game';
+import { Character, GameState, Item, LogEntry, NodeContent, Recipe, Shop } from '../types/game';
 import { Language } from '../i18n/translations';
 
 interface GameActions {
@@ -18,12 +18,25 @@ interface GameActions {
   addToSharedInventory: (item: Item) => void;
   addItemToShared: (items: Item[]) => void;
   removeFromSharedInventory: (itemId: string) => void;
+  clearSharedInventory: () => void;
   transferToPersonal: (charId: string, itemId: string) => void;
   transferToShared: (charId: string, itemId: string) => void;
   equipItem: (charId: string, itemId: string, slot: 'weapon' | 'armor' | 'acCore', fromShared?: boolean) => void;
   unequipItem: (charId: string, slot: 'weapon' | 'armor' | 'acCore') => void;
   moveEquippedToShared: (charId: string, slot: 'weapon' | 'armor' | 'acCore') => void;
   
+  // Recipe Management
+  addRecipe: (recipe: Recipe) => void;
+  removeRecipe: (id: string) => void;
+  
+  // Shop Management
+  addShop: (name: string) => void;
+  removeShop: (id: string) => void;
+  updateShop: (id: string, updates: Partial<Shop>) => void;
+  shopBuyItem: (shopId: string, itemId: string, buyerId: string) => void;
+  shopSellItem: (shopId: string, payeeId: string, item: Item, fromShared: boolean, charId?: string) => void;
+  shopSellAllShared: (shopId: string, payeeId: string) => void;
+
   // Logging
   addLog: (type: LogEntry['type'], content: string, relatedEntityId?: string) => void;
   
@@ -49,6 +62,7 @@ const initialState: GameState = {
   currentLayer: 'Shallows',
   explorationProgress: 0,
   totalNodesVisited: 0,
+  shops: [],
   logs: [],
   language: 'zh', // Default language
   configs: {
@@ -101,6 +115,8 @@ export const useGameStore = create<Store>()(
       removeFromSharedInventory: (itemId) => set((state) => ({
         sharedInventory: state.sharedInventory.filter((i) => i.id !== itemId)
       })),
+
+      clearSharedInventory: () => set({ sharedInventory: [] }),
 
       transferToPersonal: (charId, itemId) => set((state) => {
         const item = state.sharedInventory.find(i => i.id === itemId);
@@ -235,6 +251,128 @@ export const useGameStore = create<Store>()(
                       equipment: { ...c.equipment, [slot]: null }
                   } : c
               )
+          };
+      }),
+
+      addRecipe: (recipe) => set((state) => ({
+          configs: { ...state.configs, recipes: [...state.configs.recipes, recipe] }
+      })),
+
+      removeRecipe: (id) => set((state) => ({
+          configs: { ...state.configs, recipes: state.configs.recipes.filter(r => r.id !== id) }
+      })),
+
+      addShop: (name) => set((state) => ({
+          shops: [...state.shops, { id: uuidv4(), name, inventory: [], discount: 0 }]
+      })),
+
+      removeShop: (id) => set((state) => ({
+          shops: state.shops.filter(s => s.id !== id)
+      })),
+
+      updateShop: (id, updates) => set((state) => ({
+          shops: state.shops.map(s => s.id === id ? { ...s, ...updates } : s)
+      })),
+
+      shopBuyItem: (shopId, itemId, buyerId) => set((state) => {
+          const shop = state.shops.find(s => s.id === shopId);
+          const buyer = state.characters.find(c => c.id === buyerId);
+          if (!shop || !buyer) return state;
+
+          const shopItem = shop.inventory.find(i => i.itemId === itemId);
+          if (!shopItem) return state;
+
+          const itemTemplate = state.configs.customItems.find(i => i.id === itemId);
+          if (!itemTemplate) return state;
+
+          const finalPrice = Math.floor(shopItem.price * (1 - shop.discount));
+
+          if (buyer.credits < finalPrice) {
+              get().addLog('System', `Purchase failed: ${buyer.name} has insufficient credits.`);
+              return state;
+          }
+
+          if (shopItem.stock !== -1 && shopItem.stock <= 0) {
+              get().addLog('System', `Purchase failed: Item out of stock.`);
+              return state;
+          }
+
+          // Check inventory space
+          const maxLoad = 5 + buyer.baseStats.PHY * 2;
+          const currentLoad = buyer.inventory.reduce((sum, i) => sum + i.weight, 0);
+          if (currentLoad + itemTemplate.weight > maxLoad) {
+              get().addLog('System', `Purchase failed: ${buyer.name}'s inventory is full.`);
+              return state;
+          }
+
+          // Deduct credits, add item, update stock
+          const newItem = { ...itemTemplate, id: uuidv4() };
+          
+          return {
+              characters: state.characters.map(c => c.id === buyerId ? {
+                  ...c,
+                  credits: c.credits - finalPrice,
+                  inventory: [...c.inventory, newItem]
+              } : c),
+              shops: state.shops.map(s => s.id === shopId ? {
+                  ...s,
+                  inventory: s.inventory.map(i => i.itemId === itemId ? { 
+                      ...i, 
+                      stock: i.stock === -1 ? -1 : i.stock - 1 
+                  } : i)
+              } : s)
+          };
+      }),
+
+      shopSellItem: (_shopId, payeeId, item, fromShared, charId) => set((state) => {
+          const payee = state.characters.find(c => c.id === payeeId);
+          if (!payee) return state;
+
+          const value = item.value || 0;
+          
+          // Remove item
+          let newShared = [...state.sharedInventory];
+          let newChars = [...state.characters];
+
+          if (fromShared) {
+              const idx = newShared.findIndex(i => i.id === item.id);
+              if (idx !== -1) newShared.splice(idx, 1);
+          } else if (charId) {
+              newChars = newChars.map(c => c.id === charId ? {
+                  ...c,
+                  inventory: c.inventory.filter(i => i.id !== item.id)
+              } : c);
+          }
+
+          // Add credits to payee
+          newChars = newChars.map(c => c.id === payeeId ? {
+              ...c,
+              credits: c.credits + value
+          } : c);
+
+          get().addLog('System', `Sold ${item.name} for ${value} credits (Payee: ${payee.name}).`);
+
+          return {
+              sharedInventory: newShared,
+              characters: newChars
+          };
+      }),
+
+      shopSellAllShared: (_shopId, payeeId) => set((state) => {
+          const payee = state.characters.find(c => c.id === payeeId);
+          if (!payee) return state;
+
+          const totalValue = state.sharedInventory.reduce((sum, i) => sum + i.value, 0);
+          if (totalValue === 0) return state;
+
+          get().addLog('System', `Sold all shared items for ${totalValue} credits (Payee: ${payee.name}).`);
+
+          return {
+              sharedInventory: [],
+              characters: state.characters.map(c => c.id === payeeId ? {
+                  ...c,
+                  credits: c.credits + totalValue
+              } : c)
           };
       }),
 

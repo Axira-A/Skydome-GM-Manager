@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
 import { Item, Stats, Character } from '../types/game';
-import { Plus, Trash2, Battery, Coins, Edit2, Shield, Sword, Cpu, AlertTriangle, Undo } from 'lucide-react';
+import { Plus, Trash2, Battery, Coins, Edit2, Shield, Sword, Cpu, AlertTriangle, Undo, FlaskConical } from 'lucide-react';
 import clsx from 'clsx';
 import { translations } from '../i18n/translations';
 import { v4 as uuidv4 } from 'uuid';
 
 export default function OverviewPage() {
-  const { characters, addCharacter, removeCharacter, sharedInventory, configs, language, transferToPersonal, transferToShared, moveEquippedToShared, addItemToShared, removeFromSharedInventory, updateCharacter } = useGameStore();
+  const { characters, addCharacter, removeCharacter, sharedInventory, configs, language, transferToPersonal, transferToShared, moveEquippedToShared, addItemToShared, removeFromSharedInventory, updateCharacter, clearSharedInventory } = useGameStore();
   const t = translations[language || 'en'];
   
   // Character Creation State
@@ -30,6 +30,13 @@ export default function OverviewPage() {
   
   // Item Description Modal
   const [viewingItem, setViewingItem] = useState<{item: Item, source: 'shared' | 'personal' | 'equipped', charId?: string, slot?: string} | null>(null);
+
+  // Shared Inventory Clear Confirmation
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Crafting State
+  const [selectedRecipeId, setSelectedRecipeId] = useState('');
+  const [craftingLog, setCraftingLog] = useState<string[]>([]);
 
   // Handlers
   const handleCreate = () => {
@@ -79,7 +86,57 @@ export default function OverviewPage() {
     setItemCount(1);
   };
 
-  // Shared Inventory Drop Handler
+  const handleCraft = () => {
+      if (!selectedRecipeId) return;
+      const recipe = configs.recipes.find(r => r.id === selectedRecipeId);
+      if (!recipe) return;
+
+      // Check materials in Shared Inventory
+      const needed = new Map<string, number>();
+      recipe.inputs.forEach(i => needed.set(i.itemId, (needed.get(i.itemId) || 0) + i.count));
+
+      // Clone inventory for simulation
+      let currentShared = [...sharedInventory];
+      const consumedIds: string[] = [];
+
+      for (const [itemId, count] of needed.entries()) {
+          // Find items matching ID
+          const template = configs.customItems.find(c => c.id === itemId);
+          if (!template) {
+              setCraftingLog(prev => [`Error: Unknown template for input ${itemId}`, ...prev]);
+              return;
+          }
+
+          const availableInstances = currentShared.filter(i => i.name === template.name && i.type === template.type);
+          
+          if (availableInstances.length < count) {
+              setCraftingLog(prev => [`Failed: Not enough ${template.name} (Need ${count}, Have ${availableInstances.length})`, ...prev]);
+              return;
+          }
+
+          // Mark for consumption
+          for(let k=0; k<count; k++) {
+              consumedIds.push(availableInstances[k].id);
+          }
+      }
+
+      // Consume
+      consumedIds.forEach(id => removeFromSharedInventory(id));
+
+      // Produce
+      const newItems: Item[] = [];
+      recipe.outputs.forEach(out => {
+          const template = configs.customItems.find(c => c.id === out.itemId);
+          if (template) {
+              for(let k=0; k<out.count; k++) {
+                  newItems.push({ ...template, id: uuidv4() });
+              }
+          }
+      });
+      
+      addItemToShared(newItems);
+      setCraftingLog(prev => [`Success: Crafted ${recipe.name || 'Item'}`, ...prev]);
+  };
   const handleDropToShared = (e: React.DragEvent) => {
     e.preventDefault();
     const itemId = e.dataTransfer.getData('itemId');
@@ -181,11 +238,16 @@ export default function OverviewPage() {
       >
         <div className="flex justify-between items-center mb-4">
            <h3 className="text-xl font-semibold text-blue-400">{t.overview.sharedInventory}</h3>
-           <button onClick={() => setIsAddingItem(true)} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm flex items-center gap-1">
-             <Plus size={14} /> 添加物品
-           </button>
+           <div className="flex gap-2">
+               <button onClick={() => setShowClearConfirm(true)} className="bg-red-900/50 hover:bg-red-800 px-3 py-1 rounded text-sm flex items-center gap-1 text-red-200 border border-red-800">
+                 <Trash2 size={14} /> 清空
+               </button>
+               <button onClick={() => setIsAddingItem(true)} className="bg-blue-600 hover:bg-blue-700 px-3 py-1 rounded text-sm flex items-center gap-1">
+                 <Plus size={14} /> 添加物品
+               </button>
+           </div>
         </div>
-        <div className="flex flex-wrap gap-2 min-h-[100px] bg-gray-900/50 p-4 rounded">
+        <div className="flex flex-wrap gap-2 min-h-[100px] bg-gray-900/50 p-4 rounded max-h-[300px] overflow-y-auto">
           {sharedInventory.length === 0 ? <span className="text-gray-500 italic">{t.overview.emptyContainer}</span> : 
             sharedInventory.map(item => (
               <div 
@@ -207,41 +269,79 @@ export default function OverviewPage() {
         </div>
       </div>
 
-      {/* Crafting Simulator (Moved from Manager) */}
+      {/* Crafting Simulator (Updated) */}
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
-        <h3 className="text-xl font-semibold mb-4 text-yellow-400">{t.manager.craftingTitle || 'Alchemy of Edge'}</h3>
+        <h3 className="text-xl font-semibold mb-4 text-yellow-400 flex items-center gap-2"><FlaskConical /> 物品合成</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
            <div className="space-y-4">
-              <label className="block text-sm text-gray-400">{t.manager.selectRecipe || 'Select Recipe'}</label>
-              <select className="w-full bg-gray-700 p-2 rounded">
-                 <option>{t.manager.recipes?.inhibitor || 'Red Moss Inhibitor'}</option>
-                 <option>{t.manager.recipes?.converter || 'AC Attribute Converter'}</option>
-                 <option>{t.manager.recipes?.armor || 'Composite Armor'}</option>
-                 <option>{t.manager.recipes?.battery || 'Overload Battery'}</option>
+              <label className="block text-sm text-gray-400">选择配方 (仅显示可合成)</label>
+              <select 
+                className="w-full bg-gray-700 p-2 rounded"
+                value={selectedRecipeId}
+                onChange={e => setSelectedRecipeId(e.target.value)}
+              >
+                 <option value="">-- 选择配方 --</option>
+                 {configs.recipes.map(r => {
+                     // Simple check if craftable (optional, just to highlight)
+                     // const canCraft = ...
+                     return <option key={r.id} value={r.id}>{r.name}</option>;
+                 })}
               </select>
               
-              <div className="flex gap-4">
-                 <label className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" name="synthesis" defaultChecked />
-                    <span>{t.manager.stableSynth || 'Stable Synthesis'}</span>
-                 </label>
-                 <label className="flex items-center gap-2 cursor-pointer text-purple-400">
-                    <input type="radio" name="synthesis" />
-                    <span>{t.manager.erosionSynth || 'Erosion Synthesis'}</span>
-                 </label>
-              </div>
+              {selectedRecipeId && (
+                  <div className="bg-gray-900 p-3 rounded text-sm space-y-2">
+                      <div className="font-bold text-gray-400">所需素材 (从公共箱消耗):</div>
+                      {configs.recipes.find(r => r.id === selectedRecipeId)?.inputs.map((i, idx) => {
+                          const name = configs.customItems.find(c => c.id === i.itemId)?.name;
+                          const have = sharedInventory.filter(inv => inv.name === name).length; // Approximate match by name
+                          return (
+                              <div key={idx} className={clsx("flex justify-between", have >= i.count ? "text-green-400" : "text-red-400")}>
+                                  <span>{name}</span>
+                                  <span>{have}/{i.count}</span>
+                              </div>
+                          );
+                      })}
+                      <div className="border-t border-gray-700 my-2 pt-2">
+                          <div className="font-bold text-gray-400">产出物品:</div>
+                          {configs.recipes.find(r => r.id === selectedRecipeId)?.outputs.map((o, idx) => (
+                              <div key={idx} className="text-yellow-400">
+                                  {configs.customItems.find(c => c.id === o.itemId)?.name} x{o.count}
+                              </div>
+                          ))}
+                      </div>
+                  </div>
+              )}
 
-              <button className="w-full bg-yellow-600 hover:bg-yellow-700 p-3 rounded font-bold">
-                 {t.manager.synthesize || 'Synthesize'}
+              <button 
+                onClick={handleCraft}
+                disabled={!selectedRecipeId}
+                className="w-full bg-yellow-600 hover:bg-yellow-700 disabled:bg-gray-600 p-3 rounded font-bold transition"
+              >
+                 开始合成
               </button>
            </div>
            
-           <div className="bg-black p-4 rounded font-mono text-sm text-green-500">
-              <p>{t.manager.awaitingInput || '> Awaiting input...'}</p>
-              <p className="text-gray-500">{t.manager.awaitingInputDesc || '> Select a recipe and mode to begin simulation.'}</p>
+           <div className="bg-black p-4 rounded font-mono text-sm text-green-500 overflow-y-auto max-h-60">
+              {craftingLog.length === 0 ? <p>{t.manager.awaitingInput || '> Awaiting input...'}</p> : craftingLog.map((l, i) => <div key={i}>{l}</div>)}
            </div>
         </div>
       </div>
+
+      {/* Clear Shared Inventory Confirm Modal */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+           <div className="bg-gray-800 p-6 rounded-lg w-96 space-y-4 border border-red-600">
+              <div className="flex items-center gap-2 text-red-500 font-bold text-xl">
+                 <AlertTriangle /> 警告
+              </div>
+              <p className="text-gray-300">确定要清空公共资源箱吗？此操作无法撤销，箱内所有物品将永久丢失。</p>
+              <div className="flex gap-2 mt-4">
+                 <button onClick={() => { clearSharedInventory(); setShowClearConfirm(false); }} className="flex-1 bg-red-600 hover:bg-red-700 p-2 rounded text-white font-bold">确认清空</button>
+                 <button onClick={() => setShowClearConfirm(false)} className="flex-1 bg-gray-600 hover:bg-gray-700 p-2 rounded">取消</button>
+              </div>
+           </div>
+        </div>
+      )}
 
       {/* Add Item Modal */}
       {isAddingItem && (

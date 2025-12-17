@@ -130,6 +130,7 @@ export interface GameState {
   currentLayer: 'Shallows' | 'RedForest' | 'DeepSky';
   explorationProgress: number; // Nodes visited?
   totalNodesVisited: number; // New field for tracking
+  shops: Shop[];
   
   logs: LogEntry[];
   language: 'en' | 'zh';
@@ -149,9 +150,22 @@ export interface GameState {
 
 export interface Recipe {
   id: string;
-  resultId: string;
-  materials: { itemId: string; count: number }[];
-  cost: number; // Credits
+  name?: string; // Optional name for custom recipes
+  inputs: { itemId: string; count: number }[];
+  outputs: { itemId: string; count: number }[];
+}
+
+export interface ShopItem {
+  itemId: string;
+  price: number;
+  stock: number; // -1 for infinite
+}
+
+export interface Shop {
+  id: string;
+  name: string;
+  inventory: ShopItem[];
+  discount: number; // 0.0 to 1.0 (e.g. 0.9 for 10% off)
 }
 
 export interface LogEntry {

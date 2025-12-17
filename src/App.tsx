@@ -1,10 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { Users, Sword, Map as MapIcon, Settings, FileText, Globe } from 'lucide-react';
+import { Users, Sword, Map as MapIcon, Settings, FileText, Globe, ShoppingCart } from 'lucide-react';
 import OverviewPage from './pages/OverviewPage';
 import CombatPage from './pages/CombatPage';
 import MapPage from './pages/MapPage';
 import ManagerPage from './pages/ManagerPage';
 import EventLogPage from './pages/EventLogPage';
+import ShopPage from './pages/ShopPage';
 import clsx from 'clsx';
 import { useGameStore } from './store/gameStore';
 import { translations } from './i18n/translations';
@@ -42,6 +43,7 @@ function AppContent() {
         <NavItem to="/" icon={Users} label={t.nav.overview} />
         <NavItem to="/combat" icon={Sword} label={t.nav.combat} />
         <NavItem to="/map" icon={MapIcon} label={t.nav.exploration} />
+        <NavItem to="/shop" icon={ShoppingCart} label="商店" />
         <NavItem to="/manager" icon={Settings} label={t.nav.manager} />
         <NavItem to="/logs" icon={FileText} label={t.nav.eventLogs} />
 
@@ -62,6 +64,7 @@ function AppContent() {
             <Route path="/" element={<OverviewPage />} />
             <Route path="/combat" element={<CombatPage />} />
             <Route path="/map" element={<MapPage />} />
+            <Route path="/shop" element={<ShopPage />} />
             <Route path="/manager" element={<ManagerPage />} />
             <Route path="/logs" element={<EventLogPage />} />
           </Routes>

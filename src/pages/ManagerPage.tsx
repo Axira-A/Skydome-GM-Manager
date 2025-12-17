@@ -1,13 +1,41 @@
 import { useState } from 'react';
 import { useGameStore } from '../store/gameStore';
-import { Item, Enemy, Attribute, ItemType, Skill, StatusEffect, Stats, EnemyType, NodeContent } from '../types/game';
+import { Item, Enemy, Attribute, ItemType, Skill, StatusEffect, Stats, EnemyType, NodeContent, Recipe } from '../types/game';
 import { v4 as uuidv4 } from 'uuid';
-import { Trash2, Plus, Download, Upload } from 'lucide-react';
+import { Trash2, Plus, Download, Upload, FlaskConical } from 'lucide-react';
 import { translations } from '../i18n/translations';
 
 export default function ManagerPage() {
-  const { configs, updateConfig, importState, resetState, language, updateNodeRegistry } = useGameStore();
+  const { configs, updateConfig, importState, resetState, language, updateNodeRegistry, addRecipe, removeRecipe } = useGameStore();
   const t = translations[language || 'en'];
+  
+  // Recipe Creator State
+  const [newRecipe, setNewRecipe] = useState<Partial<Recipe>>({
+      inputs: [], outputs: []
+  });
+  
+  // Helpers for Recipe
+  const handleAddRecipeInput = (itemId: string) => {
+      if (newRecipe.inputs && newRecipe.inputs.length >= 4) return;
+      const current = newRecipe.inputs || [];
+      setNewRecipe({ ...newRecipe, inputs: [...current, { itemId, count: 1 }] });
+  };
+  const handleAddRecipeOutput = (itemId: string) => {
+      if (newRecipe.outputs && newRecipe.outputs.length >= 2) return;
+      const current = newRecipe.outputs || [];
+      setNewRecipe({ ...newRecipe, outputs: [...current, { itemId, count: 1 }] });
+  };
+  
+  const handleCreateRecipe = () => {
+      if (!newRecipe.inputs?.length || !newRecipe.outputs?.length) return;
+      addRecipe({
+          id: uuidv4(),
+          inputs: newRecipe.inputs,
+          outputs: newRecipe.outputs,
+          name: newRecipe.name || 'Unnamed Recipe'
+      });
+      setNewRecipe({ inputs: [], outputs: [], name: '' });
+  };
   
   // Item Creator State
   const [newItem, setNewItem] = useState<Partial<Item>>({
@@ -149,6 +177,118 @@ export default function ManagerPage() {
              <Trash2 size={16} /> {t.manager.resetAll}
            </button>
         </div>
+      </div>
+
+      {/* Recipe Creator */}
+      <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
+          <h3 className="text-xl font-semibold mb-4 text-orange-400 flex items-center gap-2"><FlaskConical /> 合成配方管理</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+              {/* Inputs */}
+              <div className="bg-gray-900 p-4 rounded">
+                  <div className="text-sm text-gray-400 mb-2">输入素材 (Max 4)</div>
+                  <div className="space-y-2">
+                      {newRecipe.inputs?.map((input, idx) => {
+                          const item = configs.customItems.find(i => i.id === input.itemId);
+                          return (
+                              <div key={idx} className="flex justify-between items-center bg-gray-800 p-2 rounded">
+                                  <span className="text-xs">{item?.name}</span>
+                                  <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number" min="1" className="w-12 bg-gray-700 p-1 rounded text-xs" 
+                                        value={input.count}
+                                        onChange={e => {
+                                            const val = parseInt(e.target.value);
+                                            const newInputs = [...(newRecipe.inputs || [])];
+                                            newInputs[idx].count = val;
+                                            setNewRecipe({ ...newRecipe, inputs: newInputs });
+                                        }}
+                                      />
+                                      <button onClick={() => setNewRecipe({ ...newRecipe, inputs: newRecipe.inputs?.filter((_, i) => i !== idx) })} className="text-red-400"><Trash2 size={12} /></button>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                      {(newRecipe.inputs?.length || 0) < 4 && (
+                          <select 
+                            className="w-full bg-gray-700 p-2 rounded text-xs"
+                            onChange={e => {
+                                if (e.target.value) handleAddRecipeInput(e.target.value);
+                                e.target.value = '';
+                            }}
+                          >
+                              <option value="">+ 添加输入素材</option>
+                              {configs.customItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                          </select>
+                      )}
+                  </div>
+              </div>
+
+              {/* Outputs */}
+              <div className="bg-gray-900 p-4 rounded">
+                  <div className="text-sm text-gray-400 mb-2">输出产物 (Max 2)</div>
+                  <div className="space-y-2">
+                      {newRecipe.outputs?.map((output, idx) => {
+                          const item = configs.customItems.find(i => i.id === output.itemId);
+                          return (
+                              <div key={idx} className="flex justify-between items-center bg-gray-800 p-2 rounded">
+                                  <span className="text-xs">{item?.name}</span>
+                                  <div className="flex items-center gap-2">
+                                      <input 
+                                        type="number" min="1" className="w-12 bg-gray-700 p-1 rounded text-xs" 
+                                        value={output.count}
+                                        onChange={e => {
+                                            const val = parseInt(e.target.value);
+                                            const newOutputs = [...(newRecipe.outputs || [])];
+                                            newOutputs[idx].count = val;
+                                            setNewRecipe({ ...newRecipe, outputs: newOutputs });
+                                        }}
+                                      />
+                                      <button onClick={() => setNewRecipe({ ...newRecipe, outputs: newRecipe.outputs?.filter((_, i) => i !== idx) })} className="text-red-400"><Trash2 size={12} /></button>
+                                  </div>
+                              </div>
+                          );
+                      })}
+                      {(newRecipe.outputs?.length || 0) < 2 && (
+                          <select 
+                            className="w-full bg-gray-700 p-2 rounded text-xs"
+                            onChange={e => {
+                                if (e.target.value) handleAddRecipeOutput(e.target.value);
+                                e.target.value = '';
+                            }}
+                          >
+                              <option value="">+ 添加输出产物</option>
+                              {configs.customItems.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                          </select>
+                      )}
+                  </div>
+              </div>
+          </div>
+          
+          <input 
+            className="w-full bg-gray-700 p-2 rounded mb-4" placeholder="配方名称 (可选)"
+            value={newRecipe.name} onChange={e => setNewRecipe({ ...newRecipe, name: e.target.value })}
+          />
+          
+          <button onClick={handleCreateRecipe} className="w-full bg-green-600 p-2 rounded flex justify-center items-center">
+            <Plus size={20} /> 创建配方
+          </button>
+
+          <div className="mt-4 max-h-60 overflow-y-auto space-y-2">
+             {configs.recipes.map(r => (
+                 <div key={r.id} className="bg-gray-900 p-2 rounded flex justify-between items-center text-xs">
+                     <div className="flex flex-col gap-1">
+                         <span className="font-bold text-orange-300">{r.name || 'Recipe'}</span>
+                         <div className="flex gap-2 items-center">
+                             <span>In: {r.inputs.map(i => `${configs.customItems.find(x => x.id === i.itemId)?.name} x${i.count}`).join(', ')}</span>
+                             <span>→</span>
+                             <span>Out: {r.outputs.map(o => `${configs.customItems.find(x => x.id === o.itemId)?.name} x${o.count}`).join(', ')}</span>
+                         </div>
+                     </div>
+                     <button onClick={() => removeRecipe(r.id)} className="text-red-400"><Trash2 size={16} /></button>
+                 </div>
+             ))}
+          </div>
       </div>
 
       {/* Item Creator */}
